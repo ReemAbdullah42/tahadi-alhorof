@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
@@ -859,6 +860,85 @@
     .boardWrap{ padding: 100px 60px 80px; }
     .letter{ font-size: 36px; }
   }
+
+  /* =========================
+     ✅ Color Picker Popup (جديد)
+  ========================= */
+  .color-picker-popup {
+    position: fixed;
+    z-index: 200;
+    background: rgba(255,255,255,0.96);
+    border-radius: 18px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+    border: 1px solid rgba(0,0,0,0.1);
+    backdrop-filter: blur(12px);
+    padding: 12px 16px;
+    min-width: 160px;
+    transform: translate(-50%, -110%);
+    animation: pickerPop 0.18s cubic-bezier(0.2, 1.2, 0.2, 1) forwards;
+    pointer-events: auto;
+  }
+
+  @keyframes pickerPop {
+    from { opacity: 0; transform: translate(-50%, -70%) scale(0.85); }
+    to   { opacity: 1; transform: translate(-50%, -110%) scale(1); }
+  }
+
+  .picker-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .picker-title {
+    font-weight: 900;
+    font-size: 15px;
+    color: #222;
+    margin-bottom: 2px;
+    user-select: none;
+  }
+
+  .picker-buttons {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .picker-btn {
+    width: 56px;
+    height: 56px;
+    border-radius: 999px;
+    border: 4px solid #fff;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.22),
+                inset 0 0 0 2px rgba(0,0,0,0.12);
+    cursor: pointer;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    position: relative;
+    outline: none;
+  }
+
+  .picker-btn:active {
+    transform: scale(0.9);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+  }
+
+  .picker-btn.team1 {
+    background: var(--team1);
+  }
+
+  .picker-btn.team2 {
+    background: var(--team2);
+  }
+
+  .picker-btn::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border-radius: 999px;
+    border: 2px solid rgba(255,255,255,0.65);
+    pointer-events: none;
+  }
 </style>
 </head>
 
@@ -982,6 +1062,17 @@
 
       <div class="winBanner" id="winBanner">
         <div class="winText" id="winText">مبروك!</div>
+      </div>
+
+      <!-- Color Picker Popup (جديد) -->
+      <div id="colorPickerPopup" class="color-picker-popup" style="display:none;">
+        <div class="picker-content">
+          <div class="picker-title">اختر الفريق</div>
+          <div class="picker-buttons">
+            <button id="pickTeam1" class="picker-btn team1" title="الفريق الأول"></button>
+            <button id="pickTeam2" class="picker-btn team2" title="الفريق الثاني"></button>
+          </div>
+        </div>
       </div>
 
       <button class="nextRoundBtn" id="nextRoundBtn" title="الجولة التالية" aria-label="الجولة التالية" type="button">
@@ -1161,6 +1252,12 @@
     var subTextEl     = $("subText");
     var pill1Text     = $("pill1Text");
     var pill2Text     = $("pill2Text");
+
+    // Color Picker elements (جديد)
+    var colorPickerPopup = $("colorPickerPopup");
+    var pickTeam1Btn     = $("pickTeam1");
+    var pickTeam2Btn     = $("pickTeam2");
+    var currentPickerCell = null; // لتخزين الخلية الحالية المفتوحة
 
     if(!svgHolder || !startBtn) return;
 
@@ -1563,6 +1660,7 @@
       pendingCount = 0;
       stopTimer();
       hideTimer();
+      hideColorPicker();
       playWinSound();
 
       if(winText) winText.textContent = "مبروك!";
@@ -1582,46 +1680,108 @@
       }, 350);
     }
 
-    function onCellClick(r,c,poly){
-      unlockAudio();
-      playClickSound();
+    // =========================
+    // ✅ Color Picker Logic (جديد - بديل النقر المتكرر)
+    // =========================
+    function showColorPicker(r, c, poly, e) {
+      if (!colorPickerPopup || !pickTeam1Btn || !pickTeam2Btn) return;
 
-      if(!namesLocked) return;
-      if(winBanner && winBanner.classList.contains("show")) return;
-      if(resultOverlay && resultOverlay.classList.contains("show")) return;
+      currentPickerCell = { r: r, c: c, poly: poly };
 
-      var i = idx2(r,c);
+      // تحديث ألوان الأزرار حسب الألوان الحالية للفريقين
+      var t1 = getComputedStyle(document.documentElement).getPropertyValue('--team1').trim();
+      var t2 = getComputedStyle(document.documentElement).getPropertyValue('--team2').trim();
+      pickTeam1Btn.style.background = t1;
+      pickTeam2Btn.style.background = t2;
 
-      if(state[i]===0){
-        state[i] = -1;
-        pendingCount++;
-        startTimerFresh();
-        applyOwnerClass(poly, state[i]);
-        blink(poly);
-        return;
+      colorPickerPopup.style.display = "block";
+
+      // حساب موقع الـ popup قرب مكان الضغط
+      var clickX = (e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX) || window.innerWidth / 2);
+      var clickY = (e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY) || window.innerHeight / 2);
+
+      // نضعه فوق الإصبع قليلاً
+      var posX = clickX;
+      var posY = clickY - 45;
+
+      // منع خروج الـ popup من الشاشة
+      if (posX < 85) posX = 85;
+      if (posX > window.innerWidth - 85) posX = window.innerWidth - 85;
+      if (posY < 70) posY = 70;
+
+      colorPickerPopup.style.left = posX + "px";
+      colorPickerPopup.style.top  = posY + "px";
+
+      // ربط أحداث الأزرار (مرة واحدة فقط)
+      if (!pickTeam1Btn._hasListener) {
+        pickTeam1Btn.addEventListener("click", function(ev) {
+          ev.stopImmediatePropagation();
+          assignTeamToCell(1);
+        });
+        pickTeam1Btn._hasListener = true;
+      }
+      if (!pickTeam2Btn._hasListener) {
+        pickTeam2Btn.addEventListener("click", function(ev) {
+          ev.stopImmediatePropagation();
+          assignTeamToCell(2);
+        });
+        pickTeam2Btn._hasListener = true;
       }
 
-      if(state[i]===-1){
-        state[i] = 1;
-        pendingCount = Math.max(0, pendingCount-1);
+      // إغلاق عند الضغط خارج الـ popup
+      setTimeout(function() {
+        document.addEventListener("pointerdown", handleOutsidePickerClick, { once: true });
+      }, 20);
+    }
 
-        if(pendingCount<=0){
-          stopTimer();
-          hideTimer();
-        }else{
-          startTimerFresh();
-        }
-      }else if(state[i]===1){
-        state[i] = 2;
-      }else{
-        state[i] = 1;
-      }
+    function assignTeamToCell(team) {
+      if (!currentPickerCell) return;
+
+      var r = currentPickerCell.r;
+      var c = currentPickerCell.c;
+      var poly = currentPickerCell.poly;
+      var i = idx2(r, c);
+
+      state[i] = team;
 
       applyOwnerClass(poly, state[i]);
       blink(poly);
 
+      hideColorPicker();
+
+      // التحقق من الفوز بعد كل تعيين
       var res = checkWinnerWithPath();
-      if(res.winner) showWinner(res.winner, res.path);
+      if (res.winner) {
+        showWinner(res.winner, res.path);
+      }
+    }
+
+    function hideColorPicker() {
+      if (colorPickerPopup) {
+        colorPickerPopup.style.display = "none";
+      }
+      currentPickerCell = null;
+    }
+
+    function handleOutsidePickerClick(ev) {
+      if (colorPickerPopup && !colorPickerPopup.contains(ev.target)) {
+        hideColorPicker();
+      }
+    }
+
+    function onCellClick(r, c, poly, e) {
+      unlockAudio();
+      playClickSound();
+
+      if (!namesLocked) return;
+      if (winBanner && winBanner.classList.contains("show")) return;
+      if (resultOverlay && resultOverlay.classList.contains("show")) return;
+
+      // إغلاق أي picker مفتوح سابقًا
+      hideColorPicker();
+
+      // نعرض الـ picker دائمًا (سواء الخلية فاضية أو مملوكة)
+      showColorPicker(r, c, poly, e);
     }
 
     function buildBoard(){
@@ -1725,7 +1885,7 @@
 
             poly.addEventListener("pointerup", function(e){
               e.preventDefault();
-              onCellClick(r1,c1,poly);
+              onCellClick(r1, c1, poly, e);
             }, {passive:false});
 
             applyOwnerClass(poly, state[idx2(r1,c1)]);
@@ -1750,6 +1910,7 @@
       stopTimer();
       resetTimer();
       hideTimer();
+      hideColorPicker();
 
       buildBoard();
       scheduleRefit();
@@ -1857,7 +2018,7 @@
       if(!confettiCanvas || !confettiCtx) return;
       confettiCanvas.style.display = "block";
       confettiParticles = [];
-      confettiEndAt = Date.now() + (durationMs || 2200);
+      confettiEndAt = Date.now() + (durationMs || 2202);
 
       spawnConfettiBurst();
       setTimeout(spawnConfettiBurst, 220);
@@ -1880,6 +2041,7 @@
 
     function showResult(){
       if(!namesLocked) return;
+      hideColorPicker();
 
       var n1 = (team1NameEl && team1NameEl.textContent) ? team1NameEl.textContent : "فريق 1";
       var n2 = (team2NameEl && team2NameEl.textContent) ? team2NameEl.textContent : "فريق 2";
@@ -1934,6 +2096,7 @@
         stopTimer();
         resetTimer();
         hideTimer();
+        hideColorPicker();
       });
     }
 
@@ -1951,6 +2114,7 @@
         stopTimer();
         resetTimer();
         hideTimer();
+        hideColorPicker();
       });
     }
 
@@ -1975,6 +2139,7 @@
         stopTimer();
         resetTimer();
         hideTimer();
+        hideColorPicker();
 
         hideResult();
       });
